@@ -2609,8 +2609,15 @@ expo-asset@~11.0.1:
 
 expo-av@~15.0.1:
   version "15.0.1"
-  resolved "https://registry.yarnpkg.com/expo-av/-/expo-av-15.0.1.tgz#c337f831c2e29174de7117c37d2f92c1275bb4c4"
+  resolved "https://registry.npmjs.org/expo-av/-/expo-av-15.0.1.tgz"
   integrity sha512-2d4j7RTH9Y5nI1FoC0woRjqnj5G8sF0al2iW6kG21PPs/CgS4QARbHxMrPxKpUXrC6iu+6EMj2h5H6T0nqteFg==
+
+expo-camera@~16.0.7:
+  version "16.0.7"
+  resolved "https://registry.npmjs.org/expo-camera/-/expo-camera-16.0.7.tgz"
+  integrity sha512-F4msGjXMa2WJ6Gest9HVA8i0txwfuwNSbGtlbgcTr5givNWfxIwx5DuW+i7w+Xstv2YqSJL3qFAAIZgHfygHTQ==
+  dependencies:
+    invariant "^2.2.4"
 
 expo-constants@~17.0.0, expo-constants@~17.0.3:
   version "17.0.3"
@@ -2634,15 +2641,27 @@ expo-font@~13.0.1:
   dependencies:
     fontfaceobserver "^2.1.0"
 
+expo-image-loader@~5.0.0:
+  version "5.0.0"
+  resolved "https://registry.yarnpkg.com/expo-image-loader/-/expo-image-loader-5.0.0.tgz#4f58a21ab26e40d6fccc211b664fd9fe21a5dcb8"
+  integrity sha512-Eg+5FHtyzv3Jjw9dHwu2pWy4xjf8fu3V0Asyy42kO+t/FbvW/vjUixpTjPtgKQLQh+2/9Nk4JjFDV6FwCnF2ZA==
+
+expo-image-picker@~16.0.3:
+  version "16.0.3"
+  resolved "https://registry.yarnpkg.com/expo-image-picker/-/expo-image-picker-16.0.3.tgz#8b096777b4455272a3cb0dccfa3cee89b81bb13c"
+  integrity sha512-c4IOqIQOtx8puWWU4fVsJhuGiAhH6gAIdrVzhimOXSEUHnfxCckRYzvznbd/0cuvaA5y9H0CSYrxpTUc/0WNVw==
+  dependencies:
+    expo-image-loader "~5.0.0"
+
 expo-keep-awake@~14.0.1:
   version "14.0.1"
   resolved "https://registry.npmjs.org/expo-keep-awake/-/expo-keep-awake-14.0.1.tgz"
   integrity sha512-c5mGCAIk2YM+Vsdy90BlEJ4ZX+KG5Au9EkJUIxXWlpnuKmDAJ3N+5nEZ7EUO1ZTheqoSBeAo4jJ8rTWPU+JXdw==
 
 expo-media-library@~17.0.2:
-  version "17.0.2"
-  resolved "https://registry.yarnpkg.com/expo-media-library/-/expo-media-library-17.0.2.tgz#8394ebe86b2736a8b3586c42b48dedee9393dc9d"
-  integrity sha512-GXY9sd8l6tK22thhLyi6DNwR4UgQo+VfIQBUSRVM6DjJSjkfpIEAVdQn0wSSDlCyIp6znWh2xQcRLXmF53jBxA==
+  version "17.0.3"
+  resolved "https://registry.npmjs.org/expo-media-library/-/expo-media-library-17.0.3.tgz"
+  integrity sha512-vo8AqWxv1C8+U8dA5W43qs8+3dgD3VZDvcCkZBQTBnGr/2Rs7x6nNQD5s7UfYyr6qmW6102JB3+OUKHpkwEssg==
 
 expo-modules-autolinking@2.0.2:
   version "2.0.2"
@@ -2672,12 +2691,12 @@ expo-permissions@^14.4.0:
 
 expo-sharing@~13.0.0:
   version "13.0.0"
-  resolved "https://registry.yarnpkg.com/expo-sharing/-/expo-sharing-13.0.0.tgz#fbc46f4afdaa265a2811fe88c2a589aae2d2de0f"
+  resolved "https://registry.npmjs.org/expo-sharing/-/expo-sharing-13.0.0.tgz"
   integrity sha512-b23ymicRmYn/Pjj05sl9tFZHN5cH9I1f0yiqY1Yk8Q3oCx0Aznri82DnTYA4T/J6D9vrkraX0wQ4jWVMOffmlg==
 
 expo-speech@~13.0.0:
   version "13.0.0"
-  resolved "https://registry.yarnpkg.com/expo-speech/-/expo-speech-13.0.0.tgz#a37d7091bd6d10b1fd446e361891d6559cac33d1"
+  resolved "https://registry.npmjs.org/expo-speech/-/expo-speech-13.0.0.tgz"
   integrity sha512-LscUm2vnRyW6ej8PP8/5E80ivix8PP3hnagOcb/7TGFyDIFVIXy1zyEjT/1kTkpT0FzN2ha+qxtLzQyQvHQcJA==
 
 expo-status-bar@~2.0.0:
@@ -4522,6 +4541,11 @@ react-is@^18.0.0:
   version "18.3.1"
   resolved "https://registry.npmjs.org/react-is/-/react-is-18.3.1.tgz"
   integrity sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==
+
+react-native-tts@^4.1.1:
+  version "4.1.1"
+  resolved "https://registry.npmjs.org/react-native-tts/-/react-native-tts-4.1.1.tgz"
+  integrity sha512-VL0TgCwkUWggbbFGIXAPKC3rM1baluAYtgOdgnaTm7UYsWf/y8n5VgmVB0J2Wa8qt1dldZ1cSsdQY9iz3evcAg==
 
 react-native@0.76.2:
   version "0.76.2"

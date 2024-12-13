@@ -12,11 +12,14 @@ import {
 } from 'react-native';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
+import io from 'socket.io-client'; // Import socket.io-client
+
+let socket = null;
 
 const { width, height } = Dimensions.get('window');
 
 // Replace with your Flask server URL
-const FLASK_SERVER_URL = 'https://88bc-105-67-135-93.ngrok-free.app/transcribe';
+const FLASK_SERVER_URL = 'https://b39e-105-67-6-147.ngrok-free.app/transcribe';
 
 export default function App() {
   const [recording, setRecording] = useState<Audio.Recording>();
@@ -126,23 +129,28 @@ export default function App() {
   
   // Update the keyword actions function
  // Enhanced keyword actions function
-function handleKeywordActions(segments) {
+ function handleKeywordActions(segments) {
   segments.forEach((segment) => {
     const text = segment.text.toLowerCase();
 
     // Enhanced detection for turning on
-    if (isSimilarToTurnOnOff(segment.text, 'on')) {
+    if (isSimilarToTurnOnOff(text, 'on')) {
+      console.log("Detected 'turn on' command");
+      console.log("Current glasses state:", glassesState); // Add this for debugging
+      
       if (!glassesState) {
         setGlassesState(true);
         Speech.speak('Glasses are now on');
+        activateSocket(); // Ensure this is called
       }
     }
 
     // Enhanced detection for turning off
-    if (isSimilarToTurnOnOff(segment.text, 'off')) {
+    if (isSimilarToTurnOnOff(text, 'off')) {
       if (glassesState) {
         setGlassesState(false);
         Speech.speak('Glasses are now off');
+        deactivateSocket();
       }
     }
 
@@ -153,18 +161,18 @@ function handleKeywordActions(segments) {
     }
   });
 }
-const FLASK_SERVER_URL = 'https://88bc-105-67-135-93.ngrok-free.app/transcribe';
+const FLASK_SERVER_URL = 'https://b39e-105-67-6-147.ngrok-free.app/transcribe';
 
 
 // Function to process image scan
 async function processImageScan() {
   try {
-    const response = await fetch('https://88bc-105-67-135-93.ngrok-free.app/process_images', {
+    const response = await fetch('https://b39e-105-67-6-147.ngrok-free.app/process_images', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ action: 'scan' }), // Adjust the body as per API requirements
+      body: JSON.stringify({ action: 'scan' }) // Ensure the backend can handle this
     });
 
     if (!response.ok) {
@@ -183,6 +191,35 @@ async function processImageScan() {
   }
 }
 
+
+function deactivateSocket() {
+  if (socket) {
+    try {
+      // Remove all event listeners to prevent memory leaks
+      socket.off('connect');
+      socket.off('status');
+      socket.off('disconnect');
+      socket.off('connect_error');
+
+      // Disconnect the socket
+      socket.disconnect();
+
+      // Explicitly set socket to null
+      socket = null;
+
+      console.log('Socket.io connection deactivated');
+      Speech.speak('Socket connection closed');
+    } catch (error) {
+      console.error('Error deactivating socket:', error);
+      Speech.speak('Failed to close socket connection');
+    }
+  } else {
+    console.log('No active socket to deactivate');
+    Speech.speak('No active socket connection');
+  }
+}
+  
+    
 
   // Start recording
   async function startRecording() {
@@ -337,6 +374,25 @@ async function processImageScan() {
   function clearRecordings() {
     recordings.forEach((recording) => recording.sound.unloadAsync());
     setRecordings([]);
+  }
+  function activateSocket() {
+    if (!socket) {
+      socket = io('https://190c-105-67-6-147.ngrok-free.app'); // Replace with your Socket.io server URL
+
+      socket.on('connect', () => { 
+        console.log('Socket.io connected');
+      });
+
+      socket.on('status', (data) => {
+        // Handle status message from the server
+        console.log('Received status:', data.status_message);
+        Speech.speak(`${data.status_message}`);
+      });
+
+      socket.on('disconnect', () => {
+        console.log('Socket.io disconnected');
+      });
+    }
   }
 
   return (

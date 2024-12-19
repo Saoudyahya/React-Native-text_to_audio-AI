@@ -10,6 +10,7 @@ import {
   Alert,
   ScrollView,
   Vibration,
+  Animated,
 } from 'react-native';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
@@ -447,17 +448,27 @@ export default function AudioRecorderApp() {
       onPressOut={handleTouchEnd}
       activeOpacity={0.7}
       disabled={isUploading}
-    >
+    >     
+      {/* Background Image */}
       <Image
-        source={require('./assets/logo copy.jpg')}
+        source={require('./assets/Background.png')}
         style={styles.backgroundImage}
         resizeMode="cover"
       />
+      
+      {/* Logo Image */}
+      <Image
+        source={require('./assets/Logo see glasses.png')}
+        style={styles.logoImage}
+        resizeMode="contain"
+      />
+      
       <View style={styles.overlayContainer}>
         <Text style={styles.recordingText}>
           {isUploading
             ? 'Uploading and Transcribing...'
-            : recording? 'Recording in Progress'
+            : recording
+            ? 'Recording in Progress'
             : authenticationState.isLocked
             ? 'Authentication Locked'
             : 'Press and Hold to Start Recording'}
@@ -484,33 +495,58 @@ export default function AudioRecorderApp() {
           />
         )}
       </View>
+      
+      <Text style={styles.footerText}>
+        © 2024 Made by Saoud Yahya and Ilyass Otmani. All Rights Reserved.
+      </Text>
     </TouchableOpacity>
   );
+  
 }
-
 const { width, height } = Dimensions.get('window');
 
 const styles = StyleSheet.create({
+  
+  
   container: {
     flex: 1,
-    width: width,
-    height: height,
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative', // Ensures absolute positioning works within this container
   },
   backgroundImage: {
     position: 'absolute',
+    top: 0,
+    left: 0,
     width: '100%',
-    height: '50%',
-    marginTop: '50%',
+    height: '100%',
+    zIndex: -1,
+    opacity: 0.4, // Lowering opacity by 50%
+  },
+  
+  logoImage: {
+    width: 250,
+    height: 250,
+    marginTop: 230,
+    zIndex: 1, // Ensures the logo appears on top of the background
+  },
+  footerText: {
+    textAlign: 'center',
+    fontSize: 10, 
+    color: 'rgba(3, 0, 0, 0.5)',
+    marginTop: 20,
+    paddingBottom: 10, 
   },
   overlayContainer: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    
     alignItems: 'center',
     justifyContent: 'center',
   },
   recordingText: {
-    color: 'white',
+    color: 'grey',
     fontSize: 18,
+    fontFamily: 'bold',
     marginBottom: 20,
     textAlign: 'center',
   },
@@ -521,7 +557,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   attemptsText: {
-    color: 'yellow',
+    color: 'rgba(109, 4, 4, 0.74)',
     fontSize: 14,
     marginBottom: 15,
   },

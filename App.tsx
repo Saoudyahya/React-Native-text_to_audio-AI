@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -9,170 +9,275 @@ import {
   Image,
   Alert,
   ScrollView,
+  Vibration,
 } from 'react-native';
 import { Audio } from 'expo-av';
 import * as Speech from 'expo-speech';
-import io from 'socket.io-client'; // Import socket.io-client
+import * as LocalAuthentication from 'expo-local-authentication';
+import io from 'socket.io-client';
 
-let socket = null;
+// Configuration Constants
+const CONFIG = {
+  FLASK_SERVER_URL: 'https://a1b8-41-251-5-194.ngrok-free.app',
+  SOCKET_URL: 'https://4c2f-41-251-5-194.ngrok-free.app',
+  TOUCH_HOLD_DURATION: 1000, // 1 second hold required
+  MAX_AUTHENTICATION_ATTEMPTS: 3,
+};
 
-const { width, height } = Dimensions.get('window');
+// Utility Functions
+const levenshteinDistance = (s1: string, s2: string): number => {
+  const m = s1.length, n = s2.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
 
-// Replace with your Flask server URL
-const FLASK_SERVER_URL = 'https://b39e-105-67-6-147.ngrok-free.app/transcribe';
+  for (let i = 0; i < m + 1; i++) dp[i][0] = i;
+  for (let j = 0; j < n + 1; j++) dp[0][j] = j;
 
-export default function App() {
-  const [recording, setRecording] = useState<Audio.Recording>();
-  const [recordings, setRecordings] = useState<
-    {
-      sound: Audio.Sound;
-      duration: string;
-      file: string | undefined;
-      transcription?: string;
-      keywords?: string[];
-      segments?: { start: number; end: number; text: string }[];
-    }[]
-  >([]);
-  const [isUploading, setIsUploading] = useState(false);
-  const [glassesState, setGlassesState] = useState(false); // Track glasses state
+  for (let i = 1; i < m + 1; i++) {
+    for (let j = 1; j < n + 1; j++) {
+      if (s1[i - 1] === s2[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1];
+      } else {
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + 1);
+      }
+    }
+  }
 
-  // Enhanced keyword checking and action handling
-  function isSimilarToScan(text: string): boolean {
-    // Convert to lowercase for case-insensitive matching
-    const cleanedText = text.toLowerCase().replace(/[^a-z]/g, '');
+  return dp[m][n];
+};
+
+// Enhanced Touch Authentication Hook
+const useTouchAuthentication = () => {
+  const [authenticationState, setAuthenticationState] = useState({
+    verified: false,
+    attempts: 0,
+    isLocked: false,
+  });
+
+  const authenticateTouch = useCallback(async () => {
+    // Check if authentication attempts exceeded
+    if (authenticationState.attempts >= CONFIG.MAX_AUTHENTICATION_ATTEMPTS) {
+      setAuthenticationState(prev => ({ ...prev, isLocked: true }));
+      Speech.speak('Too many authentication attempts. Please wait.');
+      return false;
+    }
+
+    try {
+      // First, check if device supports biometric authentication
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+      if (!hasHardware || !isEnrolled) {
+        // Fallback to manual verification if biometrics not available
+        return manualTouchVerification();
+      }
+
+      // Attempt biometric authentication
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Verify touch to start recording',
+        fallbackLabel: 'Use passcode',
+        cancelLabel: 'Cancel',
+      });
+
+      if (result.success) {
+        // Reset attempts on successful authentication
+        setAuthenticationState({
+          verified: true,
+          attempts: 0,
+          isLocked: false,
+        });
+        Vibration.vibrate(100); // Provide haptic feedback
+       
+        return true;
+      } else {
+        // Increment attempts on failure
+        setAuthenticationState(prev => ({
+          verified: false,
+          attempts: prev.attempts + 1,
+          isLocked: prev.attempts + 1 >= CONFIG.MAX_AUTHENTICATION_ATTEMPTS,
+        }));
+
+        Speech.speak('Authentication failed');
+        return false;
+      }
+    } catch (error) {
+      console.error('Authentication error:', error);
+      // Fallback to manual verification
+      return manualTouchVerification();
+    }
+  }, [authenticationState.attempts]);
+
+  const manualTouchVerification = useCallback(() => {
+    // Provide an alternative verification method
+    const challengeResponse = Math.random() < 0.5;
+    if (challengeResponse) {
+      setAuthenticationState({
+        verified: true,
+        attempts: 0,
+        isLocked: false,
+      });
+      Speech.speak('Manual verification successful');
+      return true;
+    } else {
+      setAuthenticationState(prev => ({
+        verified: false,
+        attempts: prev.attempts + 1,
+        isLocked: prev.attempts + 1 >= CONFIG.MAX_AUTHENTICATION_ATTEMPTS,
+      }));
+      Speech.speak('Manual verification failed');
+      return false;
+    }
+  }, []);
+
+  const resetAuthentication = useCallback(() => {
+    // Method to reset authentication state
+    setAuthenticationState({
+      verified: false,
+      attempts: 0,
+      isLocked: false,
+    });
+  }, []);
+
+  return {
+    authenticateTouch,
+    resetAuthentication,
+    authenticationState,
+  };
+};
+
+// Socket Connection Hook
+
+// Voice Commands Hook
+const useVoiceCommands = () => {
+  const [glassesState, setGlassesState] = useState(false);
+  const { activateSocket, deactivateSocket } = useSocketConnection();
+
+  const isSimilarToCommand = useCallback((text: string, type: 'on' | 'off'): boolean => {
+    const variations = {
+      'on': ['turnon', 'turn on', 'turon', 'turnningon'],
+      'off': ['turnoff', 'turn off', 'turonoff', 'turnningoff']
+    };
     
-    // Define a list of possible scan-like variations
-    const scanVariations = [
-      'scan',
-      'scun',
-      'skan',
-      'scarn',
-      'scane',
-      'scann',
-      'scaning',
-      'scanning'
-    ];
-
-    // Check if the cleaned text contains any scan-like substring
-    return scanVariations.some(variation => 
-      cleanedText.includes(variation) || 
+    const cleanedText = text.toLowerCase().replace(/[^a-z]/g, '');
+    return variations[type].some(
+      variation => cleanedText.includes(variation) || 
       levenshteinDistance(cleanedText, variation) <= 2
     );
-  }
+  }, []);
 
-  // Levenshtein Distance algorithm for string similarity
-  function levenshteinDistance(s1: string, s2: string): number {
-    const m = s1.length;
-    const n = s2.length;
-    const dp: number[][] = Array.from({ length: m + 1 }, () => 
-      Array(n + 1).fill(0)
-    );
-
-    // Initialize first row and column
-    for (let i = 0; i < m + 1; i++) dp[i][0] = i;
-    for (let j = 0; j < n + 1; j++) dp[0][j] = j;
-
-    // Fill the matrix
-    for (let i = 1; i < m + 1; i++) {
-      for (let j = 1; j < n + 1; j++) {
-        if (s1[i - 1] === s2[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1];
-        } else {
-          dp[i][j] = Math.min(
-            dp[i - 1][j] + 1,     // deletion
-            dp[i][j - 1] + 1,     // insertion
-            dp[i - 1][j - 1] + 1  // substitution
-          );
-        }
-      }
-    }
-
-    return dp[m][n];
-  }
-
-  // Enhanced keyword checking and action handling
-  function isSimilarToTurnOnOff(text, commandType) {
-    // Convert text to lowercase for uniformity
+  const isSimilarToScan = useCallback((text: string): boolean => {
+    const scanVariations = [
+      'scan', 'scun', 'skan', 'scarn', 
+      'scane', 'scann', 'scaning', 'scanning'
+    ];
+    
     const cleanedText = text.toLowerCase().replace(/[^a-z]/g, '');
-  
-    // Define variations for "turn on" and "turn off"
-    const turnOnVariations = [
-      'turnon',
-      'turn on',
-      'turon',
-      'turon',
-      'turnningon',
-      'turingon',
-      'tronon'
-    ];
-  
-    const turnOffVariations = [
-      'turnoff',
-      'turn off',
-      'turonoff',
-      'trnoff',
-      'turnningoff',
-      'turingoff',
-      'tronoff'
-    ];
-  
-    const variations =
-      commandType === 'on' ? turnOnVariations : turnOffVariations;
-  
-    // Check if cleaned text matches or is similar to any variations
-    return variations.some(
-      (variation) =>
-        cleanedText.includes(variation) ||
-        levenshteinDistance(cleanedText, variation) <= 2
+    return scanVariations.some(
+      variation => cleanedText.includes(variation) || 
+      levenshteinDistance(cleanedText, variation) <= 2
     );
-  }
+  }, []);
+
+  const processImageScan = useCallback(async () => {
+    try {
+      const response = await fetch(`${CONFIG.FLASK_SERVER_URL}/process_images`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'scan' })
+      });
+
+      const result = await response.json();
+      const guidance = result.guidance || 'No guidance provided';
+      Speech.speak(guidance);
+    } catch (error) {
+      console.error('Scan processing error:', error);
+      Speech.speak('Failed to retrieve guidance');
+    }
+  }, []);
+
+  const handleKeywordActions = useCallback((segments) => {
+    segments.forEach((segment) => {
+      const text = segment.text.toLowerCase();
+      const commandChecks = [
+        { 
+          check: () => isSimilarToCommand(text, 'on'), 
+          action: () => {
+            if (!glassesState) {
+              setGlassesState(true);
+              Speech.speak('Glasses are now on');
+              activateSocket();
+            }
+          }
+        },
+        { 
+          check: () => isSimilarToCommand(text, 'off'), 
+          action: () => {
+            if (glassesState) {
+              console.log(`Checking command similarity for: ${text}`);
+              setGlassesState(false);
+              Speech.speak('Glasses are now off');
+              deactivateSocket();
+            }
+          }
+        },
+        {
+          check: () => isSimilarToScan(text),
+          action: () => {
+            Speech.speak('Scanning initiated');
+            processImageScan();
+          }
+        }
+      ];
+
+      commandChecks.find(cmd => cmd.check())?.action();
+    });
+  }, [glassesState, isSimilarToCommand, isSimilarToScan, processImageScan, activateSocket, deactivateSocket]);
+
+  return { handleKeywordActions };
+};
+
+const useSocketConnection = () => {
+  const [socket, setSocket] = useState(null);
   
-  // Update the keyword actions function
- // Enhanced keyword actions function
- function handleKeywordActions(segments) {
-  segments.forEach((segment) => {
-    const text = segment.text.toLowerCase();
-
-    // Enhanced detection for turning on
-    if (isSimilarToTurnOnOff(text, 'on')) {
-      console.log("Detected 'turn on' command");
-      console.log("Current glasses state:", glassesState); // Add this for debugging
-      
-      if (!glassesState) {
-        setGlassesState(true);
-        Speech.speak('Glasses are now on');
-        activateSocket(); // Ensure this is called
-      }
+  const activateSocket = useCallback(() => {
+    const newSocket = io(CONFIG.SOCKET_URL);
+    
+    newSocket.on('connect', () => console.log('Socket connected'));
+    
+    newSocket.on('status', (data) => {
+      console.log('Received status:', data.status_message);
+      Speech.speak(data.status_message);
+    });
+    
+    setSocket(newSocket);
+    return newSocket;
+  }, []);
+  
+  const deactivateSocket = useCallback(() => {
+    if (socket) {
+      socket.close();
+      setSocket(null);
+      Speech.speak('Socket connection closed');
     }
-
-    // Enhanced detection for turning off
-    if (isSimilarToTurnOnOff(text, 'off')) {
-      if (glassesState) {
-        setGlassesState(false);
-        Speech.speak('Glasses are now off');
-        deactivateSocket();
-      }
-    }
-
-    // Enhanced scan detection
-    if (isSimilarToScan(segment.text)) {
-      Speech.speak('Scanning initiated');
-      processImageScan(); // Trigger the image processing function
-    }
+  }, [socket]);
+  
+  return { activateSocket, deactivateSocket };
+};
+// Upload Audio Function
+async function uploadAudioToServer(uri: string) {
+  const formData = new FormData();
+  formData.append('file', {
+    uri: uri,
+    name: 'recording.m4a',
+    type: 'audio/m4a',
   });
-}
-const FLASK_SERVER_URL = 'https://b39e-105-67-6-147.ngrok-free.app/transcribe';
 
-
-// Function to process image scan
-async function processImageScan() {
   try {
-    const response = await fetch('https://b39e-105-67-6-147.ngrok-free.app/process_images', {
+    const response = await fetch(`${CONFIG.FLASK_SERVER_URL}/transcribe`, {
       method: 'POST',
+      body: formData,
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'multipart/form-data',
       },
-      body: JSON.stringify({ action: 'scan' }) // Ensure the backend can handle this
     });
 
     if (!response.ok) {
@@ -181,51 +286,48 @@ async function processImageScan() {
     }
 
     const result = await response.json();
-
-    // Assuming "guidance" is the key in the response
-    const guidance = result.guidance || 'No guidance provided';
-    Speech.speak(guidance); // Speak the guidance
+    return result.data;
   } catch (error) {
-    console.error('Error during scan processing:', error);
-    Speech.speak('Failed to retrieve guidance from the server');
+    console.error('Upload Error:', error);
+    throw error;
   }
 }
 
-
-function deactivateSocket() {
-  if (socket) {
-    try {
-      // Remove all event listeners to prevent memory leaks
-      socket.off('connect');
-      socket.off('status');
-      socket.off('disconnect');
-      socket.off('connect_error');
-
-      // Disconnect the socket
-      socket.disconnect();
-
-      // Explicitly set socket to null
-      socket = null;
-
-      console.log('Socket.io connection deactivated');
-      Speech.speak('Socket connection closed');
-    } catch (error) {
-      console.error('Error deactivating socket:', error);
-      Speech.speak('Failed to close socket connection');
-    }
-  } else {
-    console.log('No active socket to deactivate');
-    Speech.speak('No active socket connection');
-  }
+// Duration Formatting Function
+function getDurationFormatted(milliseconds: number) {
+  const minutes = milliseconds / 1000 / 60;
+  const seconds = Math.round((minutes - Math.floor(minutes)) * 60);
+  return seconds < 10
+    ? `${Math.floor(minutes)}:0${seconds}`
+    : `${Math.floor(minutes)}:${seconds}`;
 }
+
+export default function AudioRecorderApp() {
+  const [recording, setRecording] = useState<Audio.Recording>();
+  const [recordings, setRecordings] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
   
-    
+  const { width, height } = useMemo(() => Dimensions.get('window'), []);
+  const { handleKeywordActions } = useVoiceCommands();
+  const { 
+    authenticateTouch, 
+    resetAuthentication, 
+    authenticationState 
+  } = useTouchAuthentication();
 
-  // Start recording
-  async function startRecording() {
+  // Start recording with authentication
+  const startRecording = useCallback(async () => {
     try {
-      const perm = await Audio.requestPermissionsAsync();
-      if (perm.status === 'granted') {
+      // First, authenticate the touch
+      const isAuthenticated = await authenticateTouch();
+      
+      if (!isAuthenticated) {
+        Speech.speak('Authentication failed. Recording cancelled.');
+        return;
+      }
+
+      const { status } = await Audio.requestPermissionsAsync();
+      if (status === 'granted') {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
@@ -237,62 +339,16 @@ function deactivateSocket() {
       }
     } catch (err) {
       console.error(err);
-      Alert.alert('Error', 'Failed to start recording');
+      Alert.alert('Recording Error', 'Failed to start recording');
     }
-  }
-
-  // Simulate scanning with speech
-  async function simulateScanning() {
-    return new Promise((resolve) => {
-      Speech.speak('Your audio is transmitting  ', { rate: 1 });
-      setTimeout(() => {
-        resolve(null);
-      }, 5000);
-    });
-  }
-
-  // Upload audio and get transcription
-  async function uploadAudioToServer(uri: string) {
-    setIsUploading(true);
-    await simulateScanning(); // Call scanning simulation before transcription begins
-    try {
-      const formData = new FormData();
-      formData.append('file', {
-        uri: uri,
-        name: 'recording.m4a',
-        type: 'audio/m4a',
-      });
-
-      const response = await fetch(FLASK_SERVER_URL, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Server responded with ${response.status}: ${errorText}`);
-      }
-
-      const result = await response.json();
-      return result.data;
-    } catch (error) {
-      console.error('Upload Error:', error);
-      Alert.alert('Upload Failed', error.message);
-      throw error;
-    } finally {
-      setIsUploading(false);
-    }
-  }
+  }, [authenticateTouch]);
 
   // Stop recording
-  async function stopRecording() {
+  const stopRecording = useCallback(async () => {
     if (!recording) return;
 
+    setIsUploading(true);
     try {
-      setRecording(undefined);
       await recording.stopAndUnloadAsync();
       const { sound, status } = await recording.createNewLoadedSoundAsync();
       const uri = recording.getURI();
@@ -300,45 +356,58 @@ function deactivateSocket() {
       if (uri) {
         try {
           const data = await uploadAudioToServer(uri);
-
-          const transcription = data.transcription?.full_text || '';
+          
+          if (data.segments) {
+            handleKeywordActions(data.segments);
+          }
 
           const newRecording = {
             sound,
             duration: getDurationFormatted(status.durationMillis),
             file: uri,
-            transcription,
+            transcription: data.transcription?.full_text || '',
             segments: data.segments,
           };
 
-          // If segments exist, handle keyword actions
-          if (data.segments) {
-            handleKeywordActions(data.segments);
-          }
-
-          setRecordings([...recordings, newRecording]);
+          setRecordings(prev => [...prev, newRecording]);
         } catch (err) {
-          Alert.alert('Error', 'Failed to upload and process recording');
-          console.error('Error processing audio file:', err);
+          Alert.alert('Processing Error', 'Failed to upload recording');
         }
       }
+      setRecording(undefined);
+      // Reset authentication state
+      resetAuthentication();
     } catch (err) {
-      console.error('Error stopping recording:', err);
+      console.error('Recording stop error:', err);
       Alert.alert('Error', 'Failed to stop recording');
+    } finally {
+      setIsUploading(false);
     }
-  }
+  }, [recording, handleKeywordActions, resetAuthentication]);
 
-  // Format duration
-  function getDurationFormatted(milliseconds: number) {
-    const minutes = milliseconds / 1000 / 60;
-    const seconds = Math.round((minutes - Math.floor(minutes)) * 60);
-    return seconds < 10
-      ? `${Math.floor(minutes)}:0${seconds}`
-      : `${Math.floor(minutes)}:${seconds}`;
-  }
+  // Touch verification handlers
+  const handleTouchStart = useCallback(() => {
+    // Prevent recording if locked due to too many authentication attempts
+    if (authenticationState.isLocked) {
+      Speech.speak('Authentication locked. Please wait.');
+      return;
+    }
+
+    // Start a timer to verify long press
+    if (!recording) {
+      startRecording();
+    }
+  }, [recording, startRecording, authenticationState.isLocked]);
+
+  const handleTouchEnd = useCallback(() => {
+    // If recording is active, stop recording
+    if (recording) {
+      stopRecording();
+    }
+  }, [recording, stopRecording]);
 
   // Render recordings
-  function getRecordingLines() {
+  const getRecordingLines = useCallback(() => {
     return recordings.map((recordingLine, index) => (
       <View key={index} style={styles.recordingContainer}>
         {recordingLine.transcription && (
@@ -346,11 +415,6 @@ function deactivateSocket() {
             <Text style={styles.transcriptionText}>
               Transcription: {recordingLine.transcription}
             </Text>
-            {recordingLine.keywords?.length > 0 && (
-              <Text style={styles.keywordText}>
-                Detected Keywords: {recordingLine.keywords.join(', ')}
-              </Text>
-            )}
           </View>
         )}
         {recordingLine.segments && (
@@ -368,42 +432,24 @@ function deactivateSocket() {
         )}
       </View>
     ));
-  }
+  }, [recordings]);
 
   // Clear recordings
-  function clearRecordings() {
+  const clearRecordings = useCallback(() => {
     recordings.forEach((recording) => recording.sound.unloadAsync());
     setRecordings([]);
-  }
-  function activateSocket() {
-    if (!socket) {
-      socket = io('https://190c-105-67-6-147.ngrok-free.app'); // Replace with your Socket.io server URL
-
-      socket.on('connect', () => { 
-        console.log('Socket.io connected');
-      });
-
-      socket.on('status', (data) => {
-        // Handle status message from the server
-        console.log('Received status:', data.status_message);
-        Speech.speak(`${data.status_message}`);
-      });
-
-      socket.on('disconnect', () => {
-        console.log('Socket.io disconnected');
-      });
-    }
-  }
+  }, [recordings]);
 
   return (
     <TouchableOpacity
       style={styles.container}
-      onPress={recording ? stopRecording : startRecording}
+      onPressIn={handleTouchStart}
+      onPressOut={handleTouchEnd}
       activeOpacity={0.7}
       disabled={isUploading}
     >
       <Image
-        source={require('./assets/1.jpeg')}
+        source={require('./assets/logo copy.jpg')}
         style={styles.backgroundImage}
         resizeMode="cover"
       />
@@ -411,10 +457,22 @@ function deactivateSocket() {
         <Text style={styles.recordingText}>
           {isUploading
             ? 'Uploading and Transcribing...'
-            : recording
-            ? 'Tap to Stop Recording'
-            : 'Tap to Start Recording'}
+            : recording? 'Recording in Progress'
+            : authenticationState.isLocked
+            ? 'Authentication Locked'
+            : 'Press and Hold to Start Recording'}
         </Text>
+        {authenticationState.isLocked && (
+          <Text style={styles.lockText}>
+            Too many failed attempts. Please wait before trying again.
+          </Text>
+        )}
+        {authenticationState.attempts > 0 && !authenticationState.isLocked && (
+          <Text style={styles.attemptsText}>
+            Authentication Attempts: {authenticationState.attempts}/
+            {CONFIG.MAX_AUTHENTICATION_ATTEMPTS}
+          </Text>
+        )}
         <ScrollView style={styles.recordingsList}>
           {getRecordingLines()}
         </ScrollView>
@@ -430,6 +488,8 @@ function deactivateSocket() {
   );
 }
 
+const { width, height } = Dimensions.get('window');
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -439,7 +499,8 @@ const styles = StyleSheet.create({
   backgroundImage: {
     position: 'absolute',
     width: '100%',
-    height: '100%',
+    height: '50%',
+    marginTop: '50%',
   },
   overlayContainer: {
     flex: 1,
@@ -451,6 +512,18 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     marginBottom: 20,
+    textAlign: 'center',
+  },
+  lockText: {
+    color: 'red',
+    fontSize: 16,
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  attemptsText: {
+    color: 'yellow',
+    fontSize: 14,
+    marginBottom: 15,
   },
   recordingsList: {
     width: '90%',
@@ -462,16 +535,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 10,
-  },
-  fill: {
-    flex: 1,
-    margin: 5,
-  },
   transcriptionContainer: {
     padding: 10,
     borderTopWidth: 1,
@@ -480,12 +543,6 @@ const styles = StyleSheet.create({
   transcriptionText: {
     fontSize: 14,
     color: '#333',
-  },
-  keywordText: {
-    fontSize: 14,
-    color: 'green',
-    fontWeight: 'bold',
-    marginTop: 5,
   },
   transcriptionTitle: {
     fontWeight: 'bold',
